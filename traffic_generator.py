@@ -21,7 +21,8 @@ class TrafficGenerator:
         self.total_requests = 0
         self.successful_requests = 0
         self.lock = threading.Lock()
-        self.executor = ThreadPoolExecutor(max_workers=50)
+        self.executor = None
+        self.thread_count = 50  # 默认线程数
         
         # 初始化User-Agents
         self._load_default_user_agents()
@@ -121,7 +122,7 @@ class TrafficGenerator:
             # 随机延迟，避免过于频繁的请求
             time.sleep(random.uniform(0.1, 0.5))
     
-    def start(self, target_url, duration_minutes=10, proxy_file=None):
+    def start(self, target_url, duration_minutes=10, thread_count=50, proxy_file=None):
         """启动流量生成"""
         if proxy_file:
             self.load_proxies(proxy_file)
@@ -131,14 +132,15 @@ class TrafficGenerator:
             self.paused = False
             self.start_time = datetime.now()
             self.duration = duration_minutes
+            self.thread_count = thread_count
             self.total_requests = 0
             self.successful_requests = 0
             
-            # 根据CPU核心数确定线程数
-            num_threads = min(100, max(10, os.cpu_count() * 10))
+            # 创建线程池执行器
+            self.executor = ThreadPoolExecutor(max_workers=thread_count)
             
             # 启动多个工作线程
-            for _ in range(num_threads):
+            for _ in range(thread_count):
                 self.executor.submit(self.worker, target_url)
             
             # 设置定时停止
@@ -149,7 +151,7 @@ class TrafficGenerator:
                     self.stop
                 ).start()
                 
-            print(f"任务已启动，持续时间: {duration_minutes}分钟")
+            print(f"任务已启动，线程数: {thread_count}, 持续时间: {duration_minutes}分钟")
             return True
         return False
     
@@ -174,10 +176,15 @@ class TrafficGenerator:
         if self.active:
             self.active = False
             self.paused = False
-            print("任务已停止")
+            
+            # 关闭线程池
+            if self.executor:
+                self.executor.shutdown(wait=False)
+                self.executor = None
             
             # 输出统计信息
             elapsed = datetime.now() - self.start_time
+            print("\n任务已停止")
             print(f"总运行时间: {elapsed}")
             print(f"总请求数: {self.total_requests}")
             print(f"成功请求: {self.successful_requests}")
@@ -188,15 +195,20 @@ class TrafficGenerator:
     
     def status(self):
         """获取当前状态"""
+        elapsed = 0
+        if self.start_time:
+            elapsed = (datetime.now() - self.start_time).seconds
+            
         return {
             'active': self.active,
             'paused': self.paused,
             'start_time': self.start_time.isoformat() if self.start_time else None,
             'duration_minutes': self.duration,
-            'elapsed_seconds': (datetime.now() - self.start_time).seconds if self.start_time else 0,
+            'elapsed_seconds': elapsed,
             'total_requests': self.total_requests,
             'successful_requests': self.successful_requests,
-            'proxy_count': len(self.proxies)
+            'proxy_count': len(self.proxies),
+            'thread_count': self.thread_count
         }
 
 # 创建流量生成器实例
@@ -208,12 +220,21 @@ def start_task():
     data = request.json
     target_url = data.get('url')
     duration = data.get('duration', 10)
+    thread_count = data.get('thread_count', 50)
     proxy_file = data.get('proxy_file')
     
     if not target_url:
         return jsonify({'error': '缺少目标URL'}), 400
     
-    if generator.start(target_url, duration, proxy_file):
+    # 验证线程数
+    try:
+        thread_count = int(thread_count)
+        if thread_count < 1 or thread_count > 500:
+            return jsonify({'error': '线程数必须在1-500之间'}), 400
+    except:
+        return jsonify({'error': '无效的线程数'}), 400
+    
+    if generator.start(target_url, duration, thread_count, proxy_file):
         return jsonify({'message': '任务已启动', 'status': generator.status()})
     return jsonify({'error': '任务已在运行中'}), 400
 
@@ -258,6 +279,7 @@ def console_interface():
         if choice == '1':
             target_url = input("目标URL: ")
             duration = input("持续时间(分钟, 默认10): ")
+            thread_count = input("线程数(默认50): ")
             proxy_file = input("代理文件路径(可选): ")
             
             try:
@@ -265,10 +287,19 @@ def console_interface():
             except:
                 duration = 10
                 
+            try:
+                thread_count = int(thread_count) if thread_count.strip() else 50
+                if thread_count < 1:
+                    thread_count = 1
+                elif thread_count > 500:
+                    thread_count = 500
+            except:
+                thread_count = 50
+                
             if proxy_file.strip() == '':
                 proxy_file = None
                 
-            generator.start(target_url, duration, proxy_file)
+            generator.start(target_url, duration, thread_count, proxy_file)
             
         elif choice == '2':
             if generator.pause():
@@ -299,6 +330,7 @@ def console_interface():
             print(f"总请求数: {status['total_requests']}")
             print(f"成功请求: {status['successful_requests']}")
             print(f"代理数量: {status['proxy_count']}")
+            print(f"线程数: {status['thread_count']}")
             
         elif choice == '6':
             if generator.active:
@@ -319,7 +351,7 @@ if __name__ == '__main__':
     
     print(f"API服务已启动: http://localhost:5000")
     print("使用以下API端点控制流量生成:")
-    print("POST /start - 启动任务 (参数: url, duration, proxy_file)")
+    print("POST /start - 启动任务 (参数: url, duration, thread_count, proxy_file)")
     print("POST /pause - 暂停任务")
     print("POST /resume - 恢复任务")
     print("POST /stop - 停止任务")

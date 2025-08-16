@@ -7,6 +7,25 @@ import ipwhois
 from ipwhois import IPWhois
 import socket
 import re
+import random
+from urllib.parse import urlparse
+
+# 全局设置
+USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Mobile/15E148 Safari/604.1'
+]
+
+def get_random_headers():
+    return {
+        'User-Agent': random.choice(USER_AGENTS),
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1'
+    }
 
 def validate_proxies():
     # 选择代理文件
@@ -23,17 +42,47 @@ def validate_proxies():
         print("文件中没有找到有效的代理")
         return
     
-    # 输入验证URL
-    test_url = input("请输入要验证的URL: ").strip()
-    if not test_url.startswith(('http://', 'https://')):
-        test_url = 'http://' + test_url
+    # 输入验证URL（多个）
+    urls_input = input("请输入要验证的URL（多个用逗号分隔）: ").strip()
+    test_urls = [url.strip() for url in urls_input.split(',') if url.strip()]
+    
+    if not test_urls:
+        print("未输入任何URL！")
+        return
+    
+    # 确保URL格式正确
+    for i, url in enumerate(test_urls):
+        if not url.startswith(('http://', 'https://')):
+            test_urls[i] = 'http://' + url
     
     # 选择验证协议类型
-    print("请选择验证协议类型:")
-    print("1. HTTP代理验证")
-    print("2. HTTPS代理验证")
-    print("3. 自动检测(HTTP和HTTPS)")
-    protocol_choice = input("请输入选项(1/2/3, 默认3): ").strip() or "3"
+    print("\n请选择要验证的代理协议:")
+    print("1. HTTP")
+    print("2. HTTPS")
+    print("3. SOCKS4")
+    print("4. SOCKS5")
+    print("5. 全部协议")
+    protocol_choice = input("请输入选项(1-5, 多个用逗号分隔, 默认5): ").strip() or "5"
+    
+    # 解析协议选择
+    selected_protocols = []
+    if protocol_choice == "5":
+        selected_protocols = ['http', 'https', 'socks4', 'socks5']
+    else:
+        choices = protocol_choice.split(',')
+        for choice in choices:
+            if choice.strip() == '1':
+                selected_protocols.append('http')
+            elif choice.strip() == '2':
+                selected_protocols.append('https')
+            elif choice.strip() == '3':
+                selected_protocols.append('socks4')
+            elif choice.strip() == '4':
+                selected_protocols.append('socks5')
+    
+    if not selected_protocols:
+        print("未选择任何协议！")
+        return
     
     # 输入线程数
     try:
@@ -41,77 +90,66 @@ def validate_proxies():
     except:
         max_workers = 100
     
-    print(f"开始验证 {len(proxies)} 个代理，使用 {max_workers} 线程...")
+    print(f"\n开始验证 {len(proxies)} 个代理，使用 {max_workers} 线程...")
+    print(f"验证协议: {', '.join(selected_protocols)}")
+    print(f"验证URL: {', '.join(test_urls)}")
     
-    valid_proxies = []
+    # 存储结果
+    valid_proxies = {}  # ip:port -> 支持的协议列表
     timeout = 10
+    required_success = len(test_urls) - 1  # 需要成功的URL数量
     
     def check_proxy(proxy):
-        try:
-            # 根据选择创建代理设置
+        """检查单个代理是否可用"""
+        proxy_supported = []
+        proxy_ip = proxy.split(':')[0]
+        
+        for protocol in selected_protocols:
             proxies_dict = {}
-            if protocol_choice == "1":  # HTTP
-                proxies_dict = {
-                    'http': f'http://{proxy}',
-                    'https': f'http://{proxy}'
-                }
-            elif protocol_choice == "2":  # HTTPS
-                proxies_dict = {
-                    'http': f'https://{proxy}',
-                    'https': f'https://{proxy}'
-                }
-            else:  # 自动检测
-                # 先尝试HTTP
-                http_proxy = {
-                    'http': f'http://{proxy}',
-                    'https': f'http://{proxy}'
-                }
-                # 再尝试HTTPS
-                https_proxy = {
-                    'http': f'https://{proxy}',
-                    'https': f'https://{proxy}'
-                }
-                
-                # 测试HTTP
-                try:
-                    response = requests.get(
-                        test_url, 
-                        proxies=http_proxy, 
-                        timeout=timeout,
-                        headers={'User-Agent': 'Mozilla/5.0'}
-                    )
-                    if response.status_code == 200:
-                        return f"http://{proxy}"
-                except:
-                    pass
-                
-                # 测试HTTPS
-                try:
-                    response = requests.get(
-                        test_url, 
-                        proxies=https_proxy, 
-                        timeout=timeout,
-                        headers={'User-Agent': 'Mozilla/5.0'}
-                    )
-                    if response.status_code == 200:
-                        return f"https://{proxy}"
-                except:
-                    pass
-                
-                return None
             
-            # 对于单一协议验证
-            response = requests.get(
-                test_url, 
-                proxies=proxies_dict, 
-                timeout=timeout,
-                headers={'User-Agent': 'Mozilla/5.0'}
-            )
-            if response.status_code == 200:
-                return proxy
-        except:
-            pass
-        return None
+            if protocol == 'http':
+                proxies_dict = {'http': f'http://{proxy}', 'https': f'http://{proxy}'}
+            elif protocol == 'https':
+                proxies_dict = {'http': f'https://{proxy}', 'https': f'https://{proxy}'}
+            elif protocol == 'socks4':
+                proxies_dict = {'http': f'socks4://{proxy}', 'https': f'socks4://{proxy}'}
+            elif protocol == 'socks5':
+                proxies_dict = {'http': f'socks5://{proxy}', 'https': f'socks5://{proxy}'}
+            
+            success_count = 0
+            for url in test_urls:
+                try:
+                    response = requests.get(
+                        url, 
+                        proxies=proxies_dict, 
+                        timeout=timeout,
+                        headers=get_random_headers()
+                    )
+                    if 200 <= response.status_code < 400:
+                        success_count += 1
+                except:
+                    pass
+            
+            # 检查是否满足成功条件
+            if success_count > required_success:
+                proxy_supported.append(protocol)
+                
+                # 对于HTTP代理，自动检查是否支持HTTPS
+                if protocol == 'http' and 'https' not in selected_protocols:
+                    try:
+                        https_proxies = {'http': f'https://{proxy}', 'https': f'https://{proxy}'}
+                        response = requests.get(
+                            random.choice(test_urls), 
+                            proxies=https_proxies, 
+                            timeout=timeout,
+                            headers=get_random_headers()
+                        )
+                        if 200 <= response.status_code < 400:
+                            proxy_supported.append('https')
+                    except:
+                        pass
+        
+        return proxy, proxy_supported
     
     # 进度计数器
     processed = 0
@@ -132,16 +170,43 @@ def validate_proxies():
             futures.append(future)
         
         for future in concurrent.futures.as_completed(futures):
-            result = future.result()
-            if result:
-                valid_proxies.append(result)
+            proxy, protocols = future.result()
+            if protocols:
+                valid_proxies[proxy] = protocols
     
     # 保存有效代理
     output_file = os.path.join(os.getcwd(), 'http.txt')
-    with open(output_file, 'w') as f:
-        f.write('\n'.join(valid_proxies))
     
-    print(f"验证完成！有效代理数: {len(valid_proxies)}")
+    with open(output_file, 'w') as f:
+        # 区域1: 只显示IP和端口
+        f.write("[区域1: IP:PORT]\n")
+        for proxy in valid_proxies.keys():
+            f.write(f"{proxy}\n")
+        
+        f.write("\n\n[区域2: 按协议分类]\n")
+        
+        # 区域2: 按协议分类显示
+        protocol_map = {
+            'http': "HTTP代理:",
+            'https': "HTTPS代理:",
+            'socks4': "SOCKS4代理:",
+            'socks5': "SOCKS5代理:"
+        }
+        
+        for protocol, title in protocol_map.items():
+            f.write(f"\n{title}\n")
+            for proxy, protocols in valid_proxies.items():
+                if protocol in protocols:
+                    if protocol == 'http':
+                        f.write(f"http://{proxy}\n")
+                    elif protocol == 'https':
+                        f.write(f"https://{proxy}\n")
+                    elif protocol == 'socks4':
+                        f.write(f"socks4://{proxy}\n")
+                    elif protocol == 'socks5':
+                        f.write(f"socks5://{proxy}\n")
+    
+    print(f"\n验证完成！有效代理数: {len(valid_proxies)}")
     print(f"结果已保存到: {output_file}")
 
 def speed_test_proxies():
@@ -164,23 +229,60 @@ def speed_test_proxies():
     if not test_url.startswith(('http://', 'https://')):
         test_url = 'http://' + test_url
     
+    # 选择测速协议
+    print("\n请选择测速使用的代理协议:")
+    print("1. HTTP")
+    print("2. HTTPS")
+    print("3. SOCKS4")
+    print("4. SOCKS5")
+    print("5. 全部协议（自动识别）")
+    protocol_choice = input("请输入选项(1-5, 默认5): ").strip() or "5"
+    
+    # 解析协议选择
+    if protocol_choice == "5":
+        selected_protocols = ['http', 'https', 'socks4', 'socks5']
+        auto_detect = True
+    else:
+        selected_protocols = []
+        protocol_map = {
+            '1': 'http',
+            '2': 'https',
+            '3': 'socks4',
+            '4': 'socks5'
+        }
+        protocol = protocol_map.get(protocol_choice, 'http')
+        selected_protocols = [protocol]
+        auto_detect = False
+    
     # 输入线程数
     try:
         max_workers = int(input("请输入线程数 (默认50): ") or 50)
     except:
         max_workers = 50
     
-    print(f"开始测速 {len(proxies)} 个代理，使用 {max_workers} 线程...")
+    print(f"\n开始测速 {len(proxies)} 个代理，使用 {max_workers} 线程...")
+    print(f"测速协议: {', '.join(selected_protocols) if auto_detect else selected_protocols[0]}")
     
-    results = []
-    timeout = 15
+    # 存储结果
+    region1_results = []  # (ip:port, speed)
+    region2_results = []  # (protocol:ip:port, speed)
+    timeout = 20
     
-    def test_speed(proxy):
+    def test_speed_for_protocol(proxy, protocol):
+        """测试特定协议的代理速度"""
         try:
-            proxies_dict = {
-                'http': f'http://{proxy}',
-                'https': f'http://{proxy}'
-            }
+            if protocol == 'http':
+                proxies_dict = {'http': f'http://{proxy}', 'https': f'http://{proxy}'}
+                prefix = "http://"
+            elif protocol == 'https':
+                proxies_dict = {'http': f'https://{proxy}', 'https': f'https://{proxy}'}
+                prefix = "https://"
+            elif protocol == 'socks4':
+                proxies_dict = {'http': f'socks4://{proxy}', 'https': f'socks4://{proxy}'}
+                prefix = "socks4://"
+            elif protocol == 'socks5':
+                proxies_dict = {'http': f'socks5://{proxy}', 'https': f'socks5://{proxy}'}
+                prefix = "socks5://"
             
             start_time = time.time()
             response = requests.get(
@@ -188,7 +290,7 @@ def speed_test_proxies():
                 proxies=proxies_dict, 
                 timeout=timeout,
                 stream=True,
-                headers={'User-Agent': 'Mozilla/5.0'}
+                headers=get_random_headers()
             )
             response.raise_for_status()
             
@@ -204,9 +306,35 @@ def speed_test_proxies():
             
             elapsed = time.time() - start_time
             speed = total_bytes / elapsed / 1024  # KB/s
-            return (proxy, round(speed, 2))
+            return prefix, round(speed, 2)
         except:
-            return (proxy, 0)
+            return None, 0
+    
+    def test_proxy(proxy):
+        """测试单个代理的速度"""
+        proxy_results = []
+        fastest_speed = 0
+        fastest_protocol = ""
+        
+        # 测试所有选择的协议
+        for protocol in selected_protocols:
+            prefix, speed = test_speed_for_protocol(proxy, protocol)
+            if speed > 0:
+                # 记录区域2结果
+                proxy_addr = f"{prefix}{proxy}"
+                region2_results.append((proxy_addr, speed))
+                proxy_results.append((prefix, speed))
+                
+                # 记录最快协议
+                if speed > fastest_speed:
+                    fastest_speed = speed
+                    fastest_protocol = prefix
+        
+        # 如果有可用的协议，记录区域1结果
+        if fastest_speed > 0:
+            region1_results.append((proxy, fastest_speed, fastest_protocol))
+        
+        return proxy, proxy_results
     
     # 进度计数器
     processed = 0
@@ -222,24 +350,41 @@ def speed_test_proxies():
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = []
         for proxy in proxies:
-            future = executor.submit(test_speed, proxy)
+            future = executor.submit(test_proxy, proxy)
             future.add_done_callback(lambda x: update_progress())
             futures.append(future)
         
+        # 等待所有任务完成
         for future in concurrent.futures.as_completed(futures):
-            results.append(future.result())
+            pass  # 结果已经在回调中收集
     
     # 按速度降序排序
-    results.sort(key=lambda x: x[1], reverse=True)
+    region1_results.sort(key=lambda x: x[1], reverse=True)
+    region2_results.sort(key=lambda x: x[1], reverse=True)
     
     # 保存测速结果
     output_file = os.path.join(os.getcwd(), 'cs.txt')
     with open(output_file, 'w') as f:
-        for proxy, speed in results:
-            if speed > 0:
-                f.write(f"{proxy} - {speed} KB/s\n")
+        # 区域1: IP:端口 速度
+        f.write("[区域1: IP:PORT 速度]\n")
+        f.write("=" * 50 + "\n")
+        for proxy, speed, protocol in region1_results:
+            f.write(f"{proxy} - {speed} KB/s\n")
+        
+        # 区域2: 协议:IP:端口 速度
+        f.write("\n\n[区域2: 协议:IP:PORT 速度]\n")
+        f.write("=" * 50 + "\n")
+        for proxy_addr, speed in region2_results:
+            f.write(f"{proxy_addr} - {speed} KB/s\n")
     
-    print(f"测速完成！有效代理数: {len([r for r in results if r[1] > 0])}")
+    # 统计信息
+    valid_proxies_count = len(region1_results)
+    total_speeds = sum(item[1] for item in region1_results)
+    avg_speed = total_speeds / valid_proxies_count if valid_proxies_count > 0 else 0
+    
+    print(f"\n测速完成！有效代理数: {valid_proxies_count}")
+    print(f"最高速度: {region1_results[0][1] if region1_results else 0} KB/s")
+    print(f"平均速度: {avg_speed:.2f} KB/s")
     print(f"结果已保存到: {output_file}")
 
 def detect_proxy_countries():
@@ -355,8 +500,8 @@ def main():
     while True:
         print("\n" + "="*50)
         print("代理工具菜单")
-        print("1. 验证代理存活")
-        print("2. 测速代理下载速度")
+        print("1. 验证代理存活 (支持HTTP/HTTPS/SOCKS4/SOCKS5)")
+        print("2. 测速代理下载速度 (支持HTTP/HTTPS/SOCKS4/SOCKS5/自动识别)")
         print("3. 检测代理国家")
         print("4. 退出")
         print("="*50)

@@ -1,11 +1,9 @@
 import os
-import re
 import time
 import concurrent.futures
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from socks import create_connection, PROXY_TYPES
 import socket
 from urllib.parse import urlparse
 

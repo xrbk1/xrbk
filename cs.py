@@ -7,7 +7,7 @@ from urllib3.util.retry import Retry
 import socket
 from urllib.parse import urlparse
 
-# 全局配置 - 超时时间改为4秒
+# 全局配置
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 TIMEOUT = 4  # 单次请求超时时间改为4秒
 SESSION = requests.Session()
@@ -24,24 +24,31 @@ adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=100, pool_max
 SESSION.mount("http://", adapter)
 SESSION.mount("https://", adapter)
 
-def parse_proxy(proxy_str, protocol):
+def parse_proxy(proxy_str, selected_protocols):
     """解析代理字符串并返回格式化代理地址"""
     proxy_str = proxy_str.strip()
     if not proxy_str:
-        return None
+        return []
+    
+    proxies = []
     
     # 处理带协议前缀的代理
     if "://" in proxy_str:
         parts = proxy_str.split("://", 1)
-        return f"{parts[0]}://{parts[1]}"
+        protocol = parts[0].lower()
+        address = parts[1].strip()
+        
+        # 如果协议在选择的协议列表中，直接添加
+        if protocol in selected_protocols:
+            proxies.append(f"{protocol}://{address}")
+    else:
+        # 处理IP:PORT格式 - 为所有选择的协议生成代理
+        for protocol in selected_protocols:
+            proxies.append(f"{protocol}://{proxy_str}")
     
-    # 处理IP:PORT格式
-    if ":" in proxy_str:
-        return f"{protocol}://{proxy_str}"
-    
-    return None
+    return proxies
 
-def test_connection(proxy, test_url, protocol, max_retries=0):
+def test_connection(proxy, test_url, max_retries=0):
     """测试代理连接性"""
     proxies = {}
     proxy_type = proxy.split("://")[0].lower()
@@ -70,7 +77,7 @@ def test_connection(proxy, test_url, protocol, max_retries=0):
                 return False, 0
     return False, 0
 
-def test_download_speed(proxy, test_url, protocol, max_retries=0):
+def test_download_speed(proxy, test_url, max_retries=0):
     """测试代理下载速度"""
     proxies = {}
     proxy_type = proxy.split("://")[0].lower()
@@ -108,7 +115,7 @@ def test_download_speed(proxy, test_url, protocol, max_retries=0):
                 return False, 0
     return False, 0
 
-def process_file(file_path, protocol):
+def process_file(file_path, selected_protocols):
     """处理代理文件并返回有效代理列表"""
     valid_proxies = []
     if not os.path.exists(file_path):
@@ -119,15 +126,14 @@ def process_file(file_path, protocol):
         lines = f.readlines()
     
     for line in lines:
-        proxy = parse_proxy(line, protocol)
-        if proxy:
-            valid_proxies.append(proxy)
+        proxies = parse_proxy(line, selected_protocols)
+        valid_proxies.extend(proxies)
     
     return valid_proxies
 
 def main():
     print("=" * 50)
-    print("代理工具 v1.1")
+    print("代理工具 v1.2")
     print("1. 代理验证 (存活检测)")
     print("2. 代理测速 (下载速度)")
     print("=" * 50)
@@ -139,11 +145,11 @@ def main():
         print("可选协议: http, https, socks4, socks5, all")
         protocol_choice = input("请选择协议: ").lower().strip()
         
-        protocols = []
+        selected_protocols = []
         if protocol_choice == 'all':
-            protocols = ['http', 'https', 'socks4', 'socks5']
+            selected_protocols = ['http', 'https', 'socks4', 'socks5']
         elif protocol_choice in ['http', 'https', 'socks4', 'socks5']:
-            protocols = [protocol_choice]
+            selected_protocols = [protocol_choice]
         else:
             print("无效的协议选择!")
             return
@@ -153,10 +159,8 @@ def main():
         max_latency = int(input("输入最大允许延迟(ms) (0=不过滤): "))
         threads = int(input("输入线程数: "))
         
-        # 处理所有协议
-        all_proxies = []
-        for proto in protocols:
-            all_proxies.extend(process_file(file_path, proto))
+        # 处理文件
+        all_proxies = process_file(file_path, selected_protocols)
         
         print(f"找到 {len(all_proxies)} 个代理，开始验证...")
         
@@ -166,8 +170,7 @@ def main():
                 executor.submit(
                     test_connection, 
                     proxy, 
-                    test_url, 
-                    proxy.split("://")[0],
+                    test_url,
                     max_retries
                 ): proxy for proxy in all_proxies
             }
@@ -198,11 +201,11 @@ def main():
         print("可选协议: http, https, socks4, socks5, all")
         protocol_choice = input("请选择协议: ").lower().strip()
         
-        protocols = []
+        selected_protocols = []
         if protocol_choice == 'all':
-            protocols = ['http', 'https', 'socks4', 'socks5']
+            selected_protocols = ['http', 'https', 'socks4', 'socks5']
         elif protocol_choice in ['http', 'https', 'socks4', 'socks5']:
-            protocols = [protocol_choice]
+            selected_protocols = [protocol_choice]
         else:
             print("无效的协议选择!")
             return
@@ -211,10 +214,8 @@ def main():
         max_retries = int(input("输入重试次数 (0=不重试): "))
         threads = int(input("输入线程数: "))
         
-        # 处理所有协议
-        all_proxies = []
-        for proto in protocols:
-            all_proxies.extend(process_file(file_path, proto))
+        # 处理文件
+        all_proxies = process_file(file_path, selected_protocols)
         
         print(f"找到 {len(all_proxies)} 个代理，开始测速...")
         
@@ -224,8 +225,7 @@ def main():
                 executor.submit(
                     test_download_speed, 
                     proxy, 
-                    test_url, 
-                    proxy.split("://")[0],
+                    test_url,
                     max_retries
                 ): proxy for proxy in all_proxies
             }

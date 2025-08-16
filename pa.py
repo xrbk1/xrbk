@@ -41,7 +41,7 @@ def fetch_proxies():
     ]
 
     # 使用线程池并发抓取
-    with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
         future_to_source = {
             executor.submit(
                 scrape_source, 
@@ -228,7 +228,7 @@ def save_to_file(proxies):
     total = len(proxies)
     
     # 使用进程池并行验证
-    with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=300) as executor:
         future_to_proxy = {executor.submit(validate_proxy, proxy): proxy for proxy in proxies}
         
         for i, future in enumerate(concurrent.futures.as_completed(future_to_proxy)):

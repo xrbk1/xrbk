@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 
 # 全局配置
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-TIMEOUT = 3  # 单次请求超时时间
+TIMEOUT = 4  # 全局超时时间改为4秒
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": USER_AGENT})
 
@@ -127,7 +127,7 @@ def process_file(file_path, protocol):
 
 def main():
     print("=" * 50)
-    print("代理工具 v1.0")
+    print("代理工具 v1.1")
     print("1. 代理验证 (存活检测)")
     print("2. 代理测速 (下载速度)")
     print("=" * 50)
@@ -150,6 +150,10 @@ def main():
         
         test_url = input("请输入测试URL: ").strip()
         max_retries = int(input("输入重试次数 (0=不重试): "))
+        
+        # 新增：输入最大延迟阈值
+        max_latency = int(input("输入最大允许延迟(ms) (0=不过滤): ").strip() or "0")
+        
         threads = int(input("输入线程数: "))
         
         # 处理所有协议
@@ -176,17 +180,24 @@ def main():
                 try:
                     success, latency = future.result()
                     if success:
-                        print(f"[✓] {proxy} 有效 | 延迟: {latency}ms")
-                        valid_proxies.append(proxy)
+                        # 新增：延迟过滤逻辑
+                        if max_latency == 0 or latency <= max_latency:
+                            print(f"[✓] {proxy} 有效 | 延迟: {latency}ms")
+                            valid_proxies.append((proxy, latency))
+                        else:
+                            print(f"[~] {proxy} 延迟过高: {latency}ms > {max_latency}ms")
                     else:
                         print(f"[✗] {proxy} 无效")
                 except Exception as e:
                     print(f"[!] {proxy} 测试出错: {str(e)}")
         
+        # 按延迟排序
+        valid_proxies.sort(key=lambda x: x[1])
+        
         # 保存结果
         with open("http.txt", "w", encoding="utf-8") as f:
-            for proxy in valid_proxies:
-                f.write(f"{proxy}\n")
+            for proxy, latency in valid_proxies:
+                f.write(f"{proxy} | {latency}ms\n")
         print(f"验证完成! 有效代理已保存到 http.txt (总数: {len(valid_proxies)})")
     
     elif choice == '2':

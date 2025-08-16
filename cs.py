@@ -8,7 +8,11 @@ from ipwhois import IPWhois
 import socket
 import re
 import random
+import urllib3
 from urllib.parse import urlparse
+
+# 禁用SSL警告
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # 全局设置
 USER_AGENTS = [
@@ -102,7 +106,6 @@ def validate_proxies():
     def check_proxy(proxy):
         """检查单个代理是否可用"""
         proxy_supported = []
-        proxy_ip = proxy.split(':')[0]
         
         for protocol in selected_protocols:
             proxies_dict = {}
@@ -119,15 +122,18 @@ def validate_proxies():
             success_count = 0
             for url in test_urls:
                 try:
+                    # 忽略SSL证书验证
                     response = requests.get(
                         url, 
                         proxies=proxies_dict, 
                         timeout=timeout,
-                        headers=get_random_headers()
+                        headers=get_random_headers(),
+                        verify=False  # 关键修改：忽略证书验证
                     )
                     if 200 <= response.status_code < 400:
                         success_count += 1
-                except:
+                except Exception as e:
+                    # 忽略所有连接错误
                     pass
             
             # 检查是否满足成功条件
@@ -142,7 +148,8 @@ def validate_proxies():
                             random.choice(test_urls), 
                             proxies=https_proxies, 
                             timeout=timeout,
-                            headers=get_random_headers()
+                            headers=get_random_headers(),
+                            verify=False  # 关键修改：忽略证书验证
                         )
                         if 200 <= response.status_code < 400:
                             proxy_supported.append('https')
@@ -285,12 +292,14 @@ def speed_test_proxies():
                 prefix = "socks5://"
             
             start_time = time.time()
+            # 忽略SSL证书验证
             response = requests.get(
                 test_url, 
                 proxies=proxies_dict, 
                 timeout=timeout,
                 stream=True,
-                headers=get_random_headers()
+                headers=get_random_headers(),
+                verify=False  # 关键修改：忽略证书验证
             )
             response.raise_for_status()
             
@@ -307,7 +316,8 @@ def speed_test_proxies():
             elapsed = time.time() - start_time
             speed = total_bytes / elapsed / 1024  # KB/s
             return prefix, round(speed, 2)
-        except:
+        except Exception as e:
+            # 忽略所有连接错误
             return None, 0
     
     def test_proxy(proxy):
@@ -446,6 +456,7 @@ def detect_proxy_countries():
             # 如果未获取到国家信息，尝试备用方法
             if country == 'Unknown':
                 try:
+                    # 使用HTTP而不是HTTPS，避免证书问题
                     response = requests.get(f"http://ipinfo.io/{ip}/country", timeout=5)
                     if response.status_code == 200:
                         country = response.text.strip() or 'Unknown'

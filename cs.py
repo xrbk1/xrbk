@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 
 # 全局配置
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-TIMEOUT = 15  # 单次请求超时时间
+TIMEOUT = 3  # 单次请求超时时间
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": USER_AGENT})
 
